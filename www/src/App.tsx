@@ -1,18 +1,18 @@
 import React from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import User from './pages/User';
-// import Host from './pages/User';
 import './App.css';
+import Host from './pages/Host';
 
 const App = () => {
   return (
-     <>
-        <Routes>
-           <Route path="/" element={<User />} />
-           {/* <Route path="/host" element={<Host />} /> */}
-        </Routes>
-     </>
+    <BrowserRouter>
+     <Routes>
+        <Route path="/" element={<User />} />
+        <Route path="host" element={<Host />} />
+     </Routes>
+    </BrowserRouter>
   );
- };
+};
 
 export default App;
