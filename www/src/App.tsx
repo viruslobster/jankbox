@@ -7,10 +7,10 @@ import Host from './pages/Host';
 const App = () => {
   return (
     <BrowserRouter>
-     <Routes>
+      <Routes>
         <Route path="/" element={<User />} />
         <Route path="host" element={<Host />} />
-     </Routes>
+      </Routes>
     </BrowserRouter>
   );
 };
