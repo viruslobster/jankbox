@@ -191,7 +191,14 @@ func addPlayerHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	http.Handle("/", http.FileServer(http.Dir("./www")))
+	// http.Handle("/", http.FileServer(http.Dir("./www")))
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+        http.ServeFile(w, r, "www/build/index.html")
+    })
+
+    fs := http.FileServer(http.Dir("www/build/static/"))
+    http.Handle("/static/", http.StripPrefix("/static", fs))
+
 	http.HandleFunc("/api/getgame", getGameHandler)
 	http.HandleFunc("/api/score", scoreHandler)
 	http.HandleFunc("/api/sendmsg", sendMsgHandler)
