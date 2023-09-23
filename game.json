@@ -1,1 +1,10 @@
-{}
+{
+	"players": [
+		{
+			"id": 1,
+			"name": "michael",
+			"score": 0
+		}
+	],
+	"msgs": []
+}

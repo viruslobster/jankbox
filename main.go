@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"encoding/json"
 	"io"
 	"io/ioutil"
@@ -12,22 +13,13 @@ import (
 )
 
 type Player struct {
-	Id     int    `json:"id"`
-	Name   string `json:"name"`
-	Score  int    `json:"score"`
-	Img    string `json:"img"`
-	Hidden bool   `json:"hidden"`
-
-	// Task specific stuff
-	Onces float64 `json:"onces"`
+	Id    int    `json:"id"`
+	Name  string `json:"name"`
+	Score int    `json:"score"`
 }
 
-const (
-	GameViewLeaderBoard = "leaderboard"
-	GameViewTimer       = "timer"
-)
-
 type Game struct {
+	mu      sync.Mutex
 	Players []*Player `json:"players"`
 	Msgs    []string  `json:"msgs"`
 }
@@ -42,84 +34,87 @@ func (g *Game) nextPlayerId() int {
 	return max + 1
 }
 
-var mu sync.Mutex
+func (g *Game) ClearMessages() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 
-func getGame() *Game {
-	data, err := ioutil.ReadFile("game.json")
-	if err != nil {
-		panic(err)
-	}
-
-	var game Game
-	err = json.Unmarshal(data, &game)
-	if err != nil {
-		panic(err)
-	}
-	return &game
+	g.Msgs = g.Msgs[:0]
+	g.dumpGame()
 }
 
-func putGame(game *Game) {
-	f, err := os.OpenFile("game.json", os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
-	if err != nil {
-		panic(err)
-	}
-	defer f.Close()
+func (g *Game) AddPlayer(name string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 
-	data, err := json.MarshalIndent(game, "", "\t")
-	if err != nil {
-		panic(err)
-	}
-	f.Write(data)
+	g.Players = append(g.Players, &Player{
+		Id:   g.nextPlayerId(),
+		Name: name,
+	})
+	g.dumpGame()
 }
 
-// TODO: http server
-// getGame
-// awardPoints
-func getGameHandler(w http.ResponseWriter, r *http.Request) {
-	mu.Lock()
-	defer mu.Unlock()
+func (g *Game) SendMessage(msg string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 
-	game := getGame()
-	j, _ := json.Marshal(game)
-	w.Write(j)
-	game.Msgs = game.Msgs[:0]
-	putGame(game)
+	g.Msgs = append(g.Msgs, msg)
+	g.dumpGame()
 }
 
-func updateScores(update map[int]int) {
-	mu.Lock()
-	defer mu.Unlock()
-
-	game := getGame()
-	players := game.Players
+func (g *Game) UpdateScores(update map[int]int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 
 	for id, delta := range update {
-		for _, player := range players {
+		for _, player := range g.Players {
 			if player.Id == id {
 				player.Score += delta
 				break
 			}
 		}
 	}
-	putGame(game)
+	g.dumpGame()
 }
 
-func updateOnces(update map[int]float64) {
-	mu.Lock()
-	defer mu.Unlock()
+func (g *Game) dumpGame() {
+	filename := "game.json"
 
-	game := getGame()
-	players := game.Players
-
-	for id, oz := range update {
-		for _, player := range players {
-			if player.Id == id {
-				player.Onces = oz
-				break
-			}
-		}
+	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
+	if err != nil {
+		panic(err)
 	}
-	putGame(game)
+	defer f.Close()
+
+	data, err := json.MarshalIndent(g, "", "\t")
+	if err != nil {
+		panic(err)
+	}
+	f.Write(data)
+}
+
+var globalGame *Game
+
+func getGame() *Game {
+	if globalGame != nil {
+		return globalGame
+	}
+	data, err := ioutil.ReadFile("game.json")
+	if err != nil {
+		panic(err)
+	}
+	globalGame = &Game{}
+	err = json.Unmarshal(data, globalGame)
+	if err != nil {
+		panic(err)
+	}
+	return globalGame
+}
+
+func getGameHandler(w http.ResponseWriter, r *http.Request) {
+	game := getGame()
+	j, _ := json.Marshal(game)
+	w.Write(j)
+	game.ClearMessages()
 }
 
 func scoreHandler(w http.ResponseWriter, r *http.Request) {
@@ -153,7 +148,8 @@ func scoreHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		update[id] = value
 	}
-	updateScores(update)
+	game := getGame()
+	game.UpdateScores(update)
 
 	http.Redirect(w, r, "/taskmaster.html", http.StatusSeeOther)
 }
@@ -167,80 +163,8 @@ func sendMsgHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		panic(err)
 	}
-	mu.Lock()
-	defer mu.Unlock()
-
 	game := getGame()
-	game.Msgs = append(game.Msgs, string(msg))
-	putGame(game)
-}
-
-func hidePlayerHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "only POST requests allowed", http.StatusBadRequest)
-		return
-	}
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form", http.StatusBadRequest)
-		return
-	}
-
-	idStr, ok := r.Form["player"]
-	if !ok || len(idStr) != 1 {
-		http.Error(w, "bad form", http.StatusBadRequest)
-		return
-	}
-	id, err := strconv.Atoi(idStr[0])
-	if err != nil {
-		http.Error(w, "bad id", http.StatusBadRequest)
-		return
-	}
-	mu.Lock()
-	defer mu.Unlock()
-
-	game := getGame()
-	for _, player := range game.Players {
-		if player.Id == id {
-			player.Hidden = true
-			putGame(game)
-			return
-		}
-	}
-	http.Error(w, "no such player", http.StatusBadRequest)
-}
-
-func showPlayerHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "only POST requests allowed", http.StatusBadRequest)
-		return
-	}
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form", http.StatusBadRequest)
-		return
-	}
-
-	idStr, ok := r.Form["player"]
-	if !ok || len(idStr) != 1 {
-		http.Error(w, "bad form", http.StatusBadRequest)
-		return
-	}
-	id, err := strconv.Atoi(idStr[0])
-	if err != nil {
-		http.Error(w, "bad id", http.StatusBadRequest)
-		return
-	}
-	mu.Lock()
-	defer mu.Unlock()
-
-	game := getGame()
-	for _, player := range game.Players {
-		if player.Id == id {
-			player.Hidden = false
-			putGame(game)
-			return
-		}
-	}
-	http.Error(w, "no such player", http.StatusBadRequest)
+	game.SendMessage(string(msg))
 }
 
 func addPlayerHandler(w http.ResponseWriter, r *http.Request) {
@@ -249,75 +173,28 @@ func addPlayerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
+		fmt.Println("/api/addplayer: could not parse form")
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
 	}
 
 	names, ok := r.Form["name"]
 	if !ok || len(names) != 1 {
+		fmt.Println("/api/addplayer: too many names")
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
 	}
 	name := names[0]
 
-	mu.Lock()
-	defer mu.Unlock()
-
 	game := getGame()
-	game.Players = append(game.Players, &Player{
-		Id:   game.nextPlayerId(),
-		Name: name,
-		Img:  "/img/derp_framed.png",
-	})
-	putGame(game)
-
-	http.Error(w, "no such player", http.StatusBadRequest)
-}
-
-func setOncesHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "only POST requests allowed", http.StatusBadRequest)
-		return
-	}
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form", http.StatusBadRequest)
-		return
-	}
-
-	update := make(map[int]float64)
-	for key, values := range r.Form {
-		if len(values) != 1 {
-			http.Error(w, "bad form", http.StatusBadRequest)
-			return
-		}
-		valueStr := values[0]
-		value, err := strconv.ParseFloat(valueStr, 64)
-		if err != nil {
-			http.Error(w, "bad form", http.StatusBadRequest)
-			return
-		}
-
-		idStr := strings.TrimPrefix(key, "player_")
-		id, err := strconv.Atoi(idStr)
-		if err != nil {
-			http.Error(w, "bad form", http.StatusBadRequest)
-			return
-		}
-		update[id] = value
-	}
-	updateOnces(update)
-
-	http.Redirect(w, r, "/disttask.html", http.StatusSeeOther)
+	game.AddPlayer(name)
 }
 
 func main() {
 	http.Handle("/", http.FileServer(http.Dir("./www")))
 	http.HandleFunc("/api/getgame", getGameHandler)
 	http.HandleFunc("/api/score", scoreHandler)
-	http.HandleFunc("/api/setonces", setOncesHandler)
 	http.HandleFunc("/api/sendmsg", sendMsgHandler)
-	http.HandleFunc("/api/hideplayer", hidePlayerHandler)
-	http.HandleFunc("/api/showplayer", showPlayerHandler)
 	http.HandleFunc("/api/addplayer", addPlayerHandler)
 	http.ListenAndServe(":8080", nil)
 }
