@@ -4,6 +4,11 @@
 			"id": 1,
 			"name": "michael",
 			"score": 0
+		},
+		{
+			"id": 2,
+			"name": "s",
+			"score": 0
 		}
 	],
 	"msgs": []

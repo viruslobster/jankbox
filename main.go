@@ -23,6 +23,13 @@ type Game struct {
 	Players []*Player `json:"players"`
 	Msgs    []string  `json:"msgs"`
 }
+// type UserRequest struct {
+// 	UserName string `json:"userName"`
+	
+// }
+// type UserResponse struct {
+// 	Id string `json:"id"`
+// }
 
 func (g *Game) nextPlayerId() int {
 	var max int
@@ -42,15 +49,17 @@ func (g *Game) ClearMessages() {
 	g.dumpGame()
 }
 
-func (g *Game) AddPlayer(name string) {
+func (g *Game) AddPlayer(name string) (int) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-
+	var id int;
+	id = g.nextPlayerId()
 	g.Players = append(g.Players, &Player{
-		Id:   g.nextPlayerId(),
+		Id:   id,
 		Name: name,
 	})
 	g.dumpGame()
+	return id
 }
 
 func (g *Game) SendMessage(msg string) {
@@ -174,20 +183,29 @@ func addPlayerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := r.ParseForm(); err != nil {
 		fmt.Println("/api/addplayer: could not parse form")
+		fmt.Println(err)
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
 	}
-
-	names, ok := r.Form["name"]
+	for key, values := range r.Form {
+		fmt.Println("here")
+		fmt.Println(key, "and ", values)
+	}
+	names, ok := r.Form["userName"]
+	fmt.Println(ok)
 	if !ok || len(names) != 1 {
-		fmt.Println("/api/addplayer: too many names")
+		fmt.Println("/api/addplayer: too many names or empty")
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
 	}
-	name := names[0]
+	name := names[0 ]
 
 	game := getGame()
-	game.AddPlayer(name)
+	var id int;
+	id = game.AddPlayer(name)
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(strconv.Itoa(id)))
+	
 }
 
 func main() {
