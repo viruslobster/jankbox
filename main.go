@@ -1,16 +1,55 @@
 package main
 
 import (
-	"fmt"
+	"bytes"
 	"encoding/json"
-	"io"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
+
+const backupGameFile = "/tmp/game.json"
+
+func playersChangedEvent(players []*Player) *Event {
+	playerNames := make([]string, len(players))
+	for i, player := range players {
+		playerNames[i] = player.Name
+	}
+	return &Event{
+		Name: "PlayersChanged",
+		Data: map[string]any{"players": playerNames},
+	}
+}
+
+func setViewEvent(name string) *Event {
+	return &Event{
+		Name: "SetView",
+		Data: map[string]any{"name": name},
+	}
+}
+
+type Event struct {
+	Name string
+	Data map[string]any
+}
+
+func (e *Event) Marshal() (string, error) {
+	buff := bytes.NewBuffer([]byte{})
+	encoder := json.NewEncoder(buff)
+	err := encoder.Encode(e.Data)
+	if err != nil {
+		return "", err
+	}
+	sb := strings.Builder{}
+	sb.WriteString(fmt.Sprintf("event: %s\n", e.Name))
+	sb.WriteString(fmt.Sprintf("data: %v\n", buff.String()))
+	return sb.String(), nil
+}
 
 type Player struct {
 	Id    int    `json:"id"`
@@ -19,17 +58,11 @@ type Player struct {
 }
 
 type Game struct {
-	mu      sync.Mutex
+	mu         sync.Mutex
+	hostEvents chan *Event
+
 	Players []*Player `json:"players"`
-	Msgs    []string  `json:"msgs"`
 }
-// type UserRequest struct {
-// 	UserName string `json:"userName"`
-	
-// }
-// type UserResponse struct {
-// 	Id string `json:"id"`
-// }
 
 func (g *Game) nextPlayerId() int {
 	var max int
@@ -41,33 +74,27 @@ func (g *Game) nextPlayerId() int {
 	return max + 1
 }
 
-func (g *Game) ClearMessages() {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	g.Msgs = g.Msgs[:0]
-	g.dumpGame()
+func (g *Game) connectHost() chan *Event {
+	if g.hostEvents != nil {
+		close(g.hostEvents)
+	}
+	g.hostEvents = make(chan *Event, 1)
+	g.hostEvents <- playersChangedEvent(g.Players)
+	return g.hostEvents
 }
 
-func (g *Game) AddPlayer(name string) (int) {
+func (g *Game) AddPlayer(name string) int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	var id int;
+	var id int
 	id = g.nextPlayerId()
 	g.Players = append(g.Players, &Player{
 		Id:   id,
 		Name: name,
 	})
-	g.dumpGame()
+	go g.dumpGame()
+	g.hostEvents <- playersChangedEvent(g.Players)
 	return id
-}
-
-func (g *Game) SendMessage(msg string) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	g.Msgs = append(g.Msgs, msg)
-	g.dumpGame()
 }
 
 func (g *Game) UpdateScores(update map[int]int) {
@@ -82,11 +109,11 @@ func (g *Game) UpdateScores(update map[int]int) {
 			}
 		}
 	}
-	g.dumpGame()
+	go g.dumpGame()
 }
 
 func (g *Game) dumpGame() {
-	filename := "game.json"
+	filename := backupGameFile
 
 	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
 	if err != nil {
@@ -107,73 +134,17 @@ func getGame() *Game {
 	if globalGame != nil {
 		return globalGame
 	}
-	data, err := ioutil.ReadFile("game.json")
-	if err != nil {
-		panic(err)
-	}
 	globalGame = &Game{}
+	data, err := ioutil.ReadFile(backupGameFile)
+	if err != nil {
+		fmt.Printf("could not read file at %s\n", backupGameFile)
+		return globalGame
+	}
 	err = json.Unmarshal(data, globalGame)
 	if err != nil {
 		panic(err)
 	}
 	return globalGame
-}
-
-func getGameHandler(w http.ResponseWriter, r *http.Request) {
-	game := getGame()
-	j, _ := json.Marshal(game)
-	w.Write(j)
-	game.ClearMessages()
-}
-
-func scoreHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "only POST requests allowed", http.StatusBadRequest)
-		return
-	}
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form", http.StatusBadRequest)
-		return
-	}
-
-	update := make(map[int]int)
-	for key, values := range r.Form {
-		if len(values) != 1 {
-			http.Error(w, "bad form", http.StatusBadRequest)
-			return
-		}
-		valueStr := values[0]
-		value, err := strconv.Atoi(valueStr)
-		if err != nil {
-			http.Error(w, "bad form", http.StatusBadRequest)
-			return
-		}
-
-		idStr := strings.TrimPrefix(key, "player_")
-		id, err := strconv.Atoi(idStr)
-		if err != nil {
-			http.Error(w, "bad form", http.StatusBadRequest)
-			return
-		}
-		update[id] = value
-	}
-	game := getGame()
-	game.UpdateScores(update)
-
-	http.Redirect(w, r, "/taskmaster.html", http.StatusSeeOther)
-}
-
-func sendMsgHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "only POST requests allowed", http.StatusBadRequest)
-		return
-	}
-	msg, err := io.ReadAll(r.Body)
-	if err != nil {
-		panic(err)
-	}
-	game := getGame()
-	game.SendMessage(string(msg))
 }
 
 func addPlayerHandler(w http.ResponseWriter, r *http.Request) {
@@ -187,39 +158,106 @@ func addPlayerHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
 	}
-	for key, values := range r.Form {
-		fmt.Println("here")
-		fmt.Println(key, "and ", values)
-	}
 	names, ok := r.Form["userName"]
-	fmt.Println(ok)
 	if !ok || len(names) != 1 {
 		fmt.Println("/api/addplayer: too many names or empty")
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
 	}
-	name := names[0 ]
+	name := names[0]
 
 	game := getGame()
-	var id int;
+	var id int
 	id = game.AddPlayer(name)
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(strconv.Itoa(id)))
-	
 }
 
+// Parses a GET request url that looks like "/api/connect/player/{player_id}"
+func parsePlayerId(url string) (int, error) {
+	parts := strings.Split(url, "/")
+	if len(parts) < 5 || parts[4] == "" {
+		return 0, fmt.Errorf("Bad url: %s", url)
+	}
+	playerIdStr := parts[4]
+	playerId, err := strconv.Atoi(playerIdStr)
+	if err != nil {
+		return 0, fmt.Errorf("Bad player id: %s", playerIdStr)
+	}
+	return playerId, nil
+}
+
+func connectPlayerHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Server side events not supported", http.StatusInternalServerError)
+		return
+	}
+	playerId, err := parsePlayerId(r.URL.Path)
+	if err != nil {
+		fmt.Println(err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	fmt.Printf("Connected player %d\n", playerId)
+
+	ticker := time.NewTicker(3 * time.Second)
+	for range ticker.C {
+		event, err := setViewEvent("HelloWorldView").Marshal()
+		if err != nil {
+			fmt.Println(err)
+			break
+		}
+		_, err = fmt.Fprint(w, event)
+		if err != nil {
+			break
+		}
+		flusher.Flush()
+	}
+	ticker.Stop()
+}
+
+func connectHostHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Server side events not supported", http.StatusInternalServerError)
+		return
+	}
+	flusher.Flush()
+
+	hostEvents := getGame().connectHost()
+	for event := range hostEvents {
+		payload, err := event.Marshal()
+		if err != nil {
+			fmt.Println(err)
+			break
+		}
+		_, err = fmt.Fprint(w, payload)
+		if err != nil {
+			fmt.Println(err)
+			break
+		}
+		flusher.Flush()
+	}
+}
 func main() {
-	// http.Handle("/", http.FileServer(http.Dir("./www")))
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-        http.ServeFile(w, r, "www/build/index.html")
-    })
+		http.ServeFile(w, r, "www/build/index.html")
+	})
 
-    fs := http.FileServer(http.Dir("www/build/static/"))
-    http.Handle("/static/", http.StripPrefix("/static", fs))
+	fs := http.FileServer(http.Dir("www/build/static/"))
+	http.Handle("/static/", http.StripPrefix("/static", fs))
 
-	http.HandleFunc("/api/getgame", getGameHandler)
-	http.HandleFunc("/api/score", scoreHandler)
-	http.HandleFunc("/api/sendmsg", sendMsgHandler)
+	http.HandleFunc("/api/connect/player/", connectPlayerHandler)
+	http.HandleFunc("/api/connect/host", connectHostHandler)
 	http.HandleFunc("/api/addplayer", addPlayerHandler)
 	http.ListenAndServe(":8080", nil)
 }
