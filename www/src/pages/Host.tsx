@@ -1,11 +1,20 @@
-import { useState, useEffect} from 'react';
+import { useState, useEffect } from 'react';
+import { useNavigate } from "react-router-dom";
+import HostBetView from './HostBetView';
+import HostJoinView from './HostJoinView';
+import HostScoresView from './HostScoresView';
 
 interface IState {
   players: Array<string>;
 }
 
 const Host = () => {
-  const [state, setState] = useState<IState>({ players: [] });
+  const navigate = useNavigate();
+  const [eventSource, setEventSource] = useState(null);
+  const [view, setView] = useState({
+    name: "HostJoinView",
+    uniqKey: 1,
+  });
 
   useEffect(() => {
     console.log("use effect");
@@ -18,21 +27,35 @@ const Host = () => {
       console.log("onopen", args);
     };
 
-    es.addEventListener("PlayersChanged", (event) => {
-      console.log("Event: PlayersChanged");
+    es.addEventListener("SetView", (event) => {
+      console.log("Event: SetView");
 
-      const players = JSON.parse(event.data);
-      setState(players);
+      const data = JSON.parse(event.data);
+      console.log(data);
+      setView({
+        name: data.name,
+        uniqKey: Date.now(),
+      });
     });
+
+    setEventSource(es);
 
     return () => { es.close() };
   }, []);
 
-  const playerList = state.players.map((player, i) => <li key={i}>{player}</li>);
+
+  const getViewComponent = (view: string, uniqKey: number) => {
+    if (view == "HostBetView") {
+      return <HostBetView key={uniqKey} eventSource={eventSource} />
+    } else if (view == "HostScoresView") {
+      return <HostScoresView key={uniqKey} eventSource={eventSource} />
+    }
+    return <HostJoinView key={uniqKey} eventSource={eventSource} />
+  };
 
   return (
     <div className="App">
-      {playerList}
+      {getViewComponent(view.name, view.uniqKey)}
     </div>
   );
 }

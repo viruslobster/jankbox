@@ -14,6 +14,11 @@ import (
 )
 
 const backupGameFile = "/tmp/game.json"
+const (
+	HostBetView    = "HostBetView"
+	HostScoresView = "HostScoresView"
+	PlayerBetView  = "BetView"
+)
 
 func playersChangedEvent(players []*Player) *Event {
 	playerNames := make([]string, len(players))
@@ -55,13 +60,102 @@ type Player struct {
 	Id    int    `json:"id"`
 	Name  string `json:"name"`
 	Score int    `json:"score"`
+	View  string `json:"view"`
+
+	events chan *Event
+}
+
+func (p *Player) SetView(view string) {
+	p.View = view
+	if p.events != nil {
+		p.events <- setViewEvent(view)
+	}
+}
+
+func newBetGame() BetGame {
+	return BetGame{
+		BetsById: make(map[int]int),
+	}
+}
+
+type BetGame struct {
+	BetsById map[int]int
 }
 
 type Game struct {
 	mu         sync.Mutex
 	hostEvents chan *Event
 
-	Players []*Player `json:"players"`
+	HostView string    `json:"hostView"`
+	Players  []*Player `json:"players"`
+	BetGame  BetGame   `json:"betGame"`
+}
+
+func (g *Game) setHostView(view string) {
+	g.HostView = view
+	if g.hostEvents != nil {
+		g.hostEvents <- setViewEvent(view)
+	}
+}
+
+func (g *Game) Play() {
+	fmt.Println("Waiting for players and host to connect...")
+	ticker := time.NewTicker(1 * time.Second)
+	for range ticker.C {
+		if len(g.Players) >= 2 {
+			ticker.Stop()
+			break
+		}
+	}
+
+	fmt.Println("Starting game")
+	for {
+		fmt.Println("Placing bets")
+		g.setHostView(HostBetView)
+
+		for _, player := range g.Players {
+			player.SetView(PlayerBetView)
+		}
+		g.BetGame = newBetGame()
+
+		ticker = time.NewTicker(1 * time.Second)
+		timer := time.NewTimer(10 * time.Second)
+
+	loop:
+		for {
+			select {
+			case <-ticker.C:
+				for _, player := range g.Players {
+					_, ok := g.BetGame.BetsById[player.Id]
+					if !ok {
+						continue loop
+					}
+				}
+				fmt.Println("all bets are in")
+				break loop
+			case <-timer.C:
+				for _, player := range g.Players {
+					_, ok := g.BetGame.BetsById[player.Id]
+					if !ok {
+						g.BetGame.BetsById[player.Id] = 0
+					}
+				}
+				fmt.Println("time for betting is up")
+				break loop
+			}
+		}
+		fmt.Println("Bets placed")
+
+		for _, player := range g.Players {
+			if g.BetGame.BetsById[player.Id] == 50 {
+				player.Score++
+			}
+		}
+		g.setHostView(HostScoresView)
+
+		time.Sleep(10 * time.Second)
+	}
+
 }
 
 func (g *Game) nextPlayerId() int {
@@ -74,13 +168,39 @@ func (g *Game) nextPlayerId() int {
 	return max + 1
 }
 
-func (g *Game) connectHost() chan *Event {
+func (g *Game) playerById(id int) *Player {
+	for _, player := range g.Players {
+		if player.Id == id {
+			return player
+		}
+	}
+	return nil
+}
+
+func (g *Game) PlaceBet(playerId, bet int) {
+	g.BetGame.BetsById[playerId] = bet
+	go g.dumpGame()
+}
+
+func (g *Game) ConnectHost() chan *Event {
 	if g.hostEvents != nil {
 		close(g.hostEvents)
 	}
 	g.hostEvents = make(chan *Event, 1)
 	g.hostEvents <- playersChangedEvent(g.Players)
 	return g.hostEvents
+}
+
+func (g *Game) ConnectPlayer(id int) (chan *Event, error) {
+	player := g.playerById(id)
+	if player == nil {
+		return nil, fmt.Errorf("Invalid player id: %d", id)
+	}
+	if player.events != nil {
+		close(player.events)
+	}
+	player.events = make(chan *Event, 1)
+	return player.events, nil
 }
 
 func (g *Game) AddPlayer(name string) int {
@@ -92,8 +212,10 @@ func (g *Game) AddPlayer(name string) int {
 		Id:   id,
 		Name: name,
 	})
-	go g.dumpGame()
-	g.hostEvents <- playersChangedEvent(g.Players)
+	go func() {
+		g.dumpGame()
+		g.hostEvents <- playersChangedEvent(g.Players)
+	}()
 	return id
 }
 
@@ -113,9 +235,10 @@ func (g *Game) UpdateScores(update map[int]int) {
 }
 
 func (g *Game) dumpGame() {
-	filename := backupGameFile
+	g.mu.Lock()
+	defer g.mu.Unlock()
 
-	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
+	f, err := os.OpenFile(backupGameFile, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
 	if err != nil {
 		panic(err)
 	}
@@ -148,6 +271,7 @@ func getGame() *Game {
 }
 
 func addPlayerHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("addPlayerHandler")
 	if r.Method != "POST" {
 		http.Error(w, "only POST requests allowed", http.StatusBadRequest)
 		return
@@ -201,22 +325,26 @@ func connectPlayerHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	playerEvents, err := getGame().ConnectPlayer(playerId)
+	if err != nil {
+		fmt.Println(err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	fmt.Printf("Connected player %d\n", playerId)
 
-	ticker := time.NewTicker(3 * time.Second)
-	for range ticker.C {
-		event, err := setViewEvent("HelloWorldView").Marshal()
+	for event := range playerEvents {
+		payload, err := event.Marshal()
 		if err != nil {
 			fmt.Println(err)
 			break
 		}
-		_, err = fmt.Fprint(w, event)
+		_, err = fmt.Fprint(w, payload)
 		if err != nil {
 			break
 		}
 		flusher.Flush()
 	}
-	ticker.Stop()
 }
 
 func connectHostHandler(w http.ResponseWriter, r *http.Request) {
@@ -233,7 +361,8 @@ func connectHostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	flusher.Flush()
 
-	hostEvents := getGame().connectHost()
+	hostEvents := getGame().ConnectHost()
+	fmt.Println("Connected Host")
 	for event := range hostEvents {
 		payload, err := event.Marshal()
 		if err != nil {
@@ -248,7 +377,44 @@ func connectHostHandler(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 	}
 }
+
+type PlayerBetRequest struct {
+	PlayerId int `json:"playerId"`
+	Bet      int `json:"bet"`
+}
+
+func playerBetHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "only POST requests allowed", http.StatusBadRequest)
+		return
+	}
+	decoder := json.NewDecoder(r.Body)
+	var request PlayerBetRequest
+	err := decoder.Decode(&request)
+	if err != nil {
+		fmt.Println(err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	getGame().PlaceBet(request.PlayerId, request.Bet)
+}
+
+func playerScoresHandler(w http.ResponseWriter, r *http.Request) {
+	scores := make(map[string]int)
+	for _, player := range getGame().Players {
+		scores[player.Name] = player.Score
+	}
+	payload, err := json.Marshal(scores)
+	if err != nil {
+		panic(err)
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write(payload)
+}
+
 func main() {
+	go getGame().Play()
+
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "www/build/index.html")
 	})
@@ -259,5 +425,7 @@ func main() {
 	http.HandleFunc("/api/connect/player/", connectPlayerHandler)
 	http.HandleFunc("/api/connect/host", connectHostHandler)
 	http.HandleFunc("/api/addplayer", addPlayerHandler)
+	http.HandleFunc("/api/player/bet", playerBetHandler)
+	http.HandleFunc("/api/player/scores", playerScoresHandler)
 	http.ListenAndServe(":8080", nil)
 }

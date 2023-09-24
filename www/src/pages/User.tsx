@@ -1,49 +1,44 @@
-import React from 'react';
+import React, { useState } from 'react';
 import '../App.css';
+import PlayerBetView from './PlayerBetView';
+import AddPlayerView from './AddPlayerView';
 
 const User = () => {
-  function handleSubmit(e) {
-    // Prevent the browser from reloading the page
-    e.preventDefault();
+  console.log("re-render user");
+  const [view, setView] = useState({
+    name: "AddPlayerView",
+    uniqKey: 1,
+  });
 
-    // Read the form data
-    const form = e.target;
-    const formData = new FormData(form);
-    
-    // You can pass formData as a fetch body directly:
-    const formJson = Object.fromEntries(formData.entries());
-    console.log(formJson);
-    fetch("/api/addplayer", {
-      method: form.method,
-      body: new URLSearchParams(formData as any),
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded"
-      },
-    }).then((response) => {
-      if (!response.ok) {
-        throw new Error("Network response was not ok");
-      }
-      return response.json();
-    }).then((data) => {
-      // Handle the response from the server
-      console.log(data);
-    })
-    .catch((error) => {
-      console.error("Error:", error);
+  const [playerId, setPlayerId] = useState(null);
+
+  const connectPlayer = (playerId: number) => {
+    setPlayerId(playerId);
+
+    const eventSource = new EventSource(`/api/connect/player/${playerId}`);
+    eventSource.addEventListener("SetView", (event) => {
+      console.log("Event: SetView");
+      const data = JSON.parse(event.data);
+
+      setView({
+        name: data.name,
+        uniqKey: Date.now(),
+      });
     });
-    // Or you can work with it as a plain object:
-
   }
+
+  const getViewComponent = (view: string, uniqKey: number) => {
+    if (view == "BetView") {
+      return <PlayerBetView key={uniqKey} playerId={playerId} />
+    }
+    return <AddPlayerView key={uniqKey} onPlayerAdd={connectPlayer} />
+  };
+
+  console.log(view);
+
   return (
     <div className="App">
-      <header className="App-header">
-      <form method="POST" onSubmit={handleSubmit}>
-      <label>
-        User: <input name="userName" />
-      </label>
-      <button type="submit">Enter</button>
-      </form>
-      </header>
+      {getViewComponent(view.name, view.uniqKey)}
     </div>
   );
 }
