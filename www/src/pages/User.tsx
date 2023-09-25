@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import '../App.css';
-import PlayerBetView from './PlayerBetView';
+import PlayerBetView from './BetGame/PlayerBetView';
 import AddPlayerView from './AddPlayerView';
 
 const User = () => {

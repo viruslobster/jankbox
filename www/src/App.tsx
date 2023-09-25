@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import User from './pages/User';
 import './App.css';
 import Host from './pages/Host';
-import PlayerBetView from './pages/PlayerBetView';
+import PlayerBetView from './pages/BetGame/PlayerBetView';
 
 const App = () => {
   return (

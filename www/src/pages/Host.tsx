@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from "react-router-dom";
-import HostBetView from './HostBetView';
-import HostJoinView from './HostJoinView';
-import HostScoresView from './HostScoresView';
+import HostBetView from './BetGame/HostBetView';
+import HostJoinView from './BetGame//HostJoinView';
+import HostScoresView from './BetGame/HostScoresView';
 
 interface IState {
   players: Array<string>;
