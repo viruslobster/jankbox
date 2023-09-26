@@ -46,9 +46,11 @@ const Host = () => {
 
   const getViewComponent = (view: string, uniqKey: number) => {
     if (view == "HostBetView") {
-      return <HostBetView key={uniqKey} eventSource={eventSource} />
+        return <HostBetView key={uniqKey} eventSource={eventSource} />
     } else if (view == "HostScoresView") {
-      return <HostScoresView key={uniqKey} eventSource={eventSource} />
+        return <HostScoresView key={uniqKey} eventSource={eventSource} />
+    } else if (view == "CreateEpisodeView") {
+        // return <HostCreateEpisodeView key={uniqKey} eventSource={eventSource} />
     }
     return <HostJoinView key={uniqKey} eventSource={eventSource} />
   };

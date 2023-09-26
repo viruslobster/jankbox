@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"github.com/viruslobster/jankbox/quiplash"
 )
 
 const backupGameFile = "/tmp/game.json"
@@ -427,5 +428,7 @@ func main() {
 	http.HandleFunc("/api/addplayer", addPlayerHandler)
 	http.HandleFunc("/api/player/bet", playerBetHandler)
 	http.HandleFunc("/api/player/scores", playerScoresHandler)
+	
+	http.HandleFunc("/quiplash/player/episodeCreateAddPrompt", quiplash.AddEpisodeIdeaToListHandler)
 	http.ListenAndServe(":8080", nil)
 }
