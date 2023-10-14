@@ -25,10 +25,20 @@ const HostJoinView = ({ eventSource }: HostJoinViewProps) => {
 
   const playerList = players.map((player, i) => <li key={i}>{player}</li>);
   return (
+    <header className='App-header'>
     <div>
       HostJoinView
       {playerList}
     </div>
+    <div>
+      <form method="POST" onSubmit={handleSubmit}>
+        <label>
+          Episode Idea: <input name="prompt" />
+        </label>
+        <button type="submit">Enter</button>
+      </form>
+    </div>
+    </header>
   );
 }
 

@@ -36,7 +36,8 @@ const User = () => {
     if (view == "BetView") {
       return <PlayerBetView key={uniqKey} playerId={playerId} />
     }
-    if (view == "AddEpisodeQuiplashView")  {
+    if (view == "PlayerCreateEpisodeView")  {
+      console.log("here")
       return <PlayerCreateEpisodeView key={uniqKey} playerId={playerId} />
     }
     return <AddPlayerView key={uniqKey} onPlayerAdd={connectPlayer} />

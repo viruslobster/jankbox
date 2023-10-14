@@ -1,9 +1,14 @@
 package quiplash
-
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+)
 const episodeFile = "/tmp/episode.json"
 type PlayerEpisodeCreateRequest struct {
-	PlayerId int `json:"playerId"`
-	PromptIdea      int `json:"prompt"`
+	PlayerId string `json:"playerId"`
+	PromptIdea  string `json:"prompt"`
 }
 func AddEpisodeIdeaToListHandler(w http.ResponseWriter, r *http.Request) { 
 	if r.Method != "POST" {
@@ -23,9 +28,9 @@ func AddEpisodeIdeaToListHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 
 }
-func writeEpisode(episode PlayerEpisodeCreateRequest)) {
+func writeEpisode(episode PlayerEpisodeCreateRequest) {
 
-	f, err := os.OpenFile(episodeFile, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
+	f, err := os.OpenFile(episodeFile, os.O_APPEND | os.O_WRONLY | os.O_CREATE, 0755)
 	if err != nil {
 		panic(err)
 	}

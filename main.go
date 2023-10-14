@@ -414,7 +414,7 @@ func playerScoresHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	go getGame().Play()
+	// go getGame().Play()
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "www/build/index.html")

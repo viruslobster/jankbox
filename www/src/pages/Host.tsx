@@ -7,8 +7,10 @@ import HostScoresView from './BetGame/HostScoresView';
 interface IState {
   players: Array<string>;
 }
-
-const Host = () => {
+interface CurrentGameProps {
+  gmaeName: string,
+}
+const Host = ({ gameName }: CurrentGameProps) => {
   const navigate = useNavigate();
   const [eventSource, setEventSource] = useState(null);
   const [view, setView] = useState({
