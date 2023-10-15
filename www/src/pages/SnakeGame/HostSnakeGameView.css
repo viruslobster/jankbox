@@ -1,0 +1,11 @@
+body {
+    overscroll-behavior: none;
+}
+
+button {
+    background-color: red;
+}
+
+.game {
+    user-select: none;
+}

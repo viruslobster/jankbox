@@ -32,6 +32,7 @@ func AddEpisodeIdeaToListHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 
 }
+
 func writeEpisode(episode PlayerEpisodeCreateRequest) {
 
 	f, err := os.OpenFile(episodeFile, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)

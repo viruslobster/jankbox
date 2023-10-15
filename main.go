@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -11,16 +12,32 @@ import (
 	"strings"
 	"sync"
 	"time"
-
 	// "github.com/viruslobster/jankbox/quiplash"
 )
 
 const backupGameFile = "/tmp/game.json"
 const (
-	HostBetView    = "HostBetView"
-	HostScoresView = "HostScoresView"
-	PlayerBetView  = "BetView"
+	HostBetView            = "HostBetView"
+	HostScoresView         = "HostScoresView"
+	PlayerBetView          = "BetView"
+	HostSnakeGameView      = "HostSnakeGameView"
+	PlayerSnakeControlView = "PlayerSnakeControlView"
 )
+
+type PlayerBetRequest struct {
+	PlayerId int `json:"playerId"`
+	Bet      int `json:"bet"`
+}
+
+type PlayerSnakeControlRequest struct {
+	PlayerId  int    `json:"playerId"`
+	Direction string `json:"direction"`
+	Time      int    `json:"time"`
+}
+
+type LogRequest struct {
+	Data string `json:"data"`
+}
 
 func playersChangedEvent(players []*Player) *Event {
 	playerNames := make([]string, len(players))
@@ -37,6 +54,16 @@ func setViewEvent(name string) *Event {
 	return &Event{
 		Name: "SetView",
 		Data: map[string]any{"name": name},
+	}
+}
+
+func controlSnakeEvent(playerId int, direction string) *Event {
+	return &Event{
+		Name: "ControlSnake",
+		Data: map[string]any{
+			"playerId":  playerId,
+			"direction": direction,
+		},
 	}
 }
 
@@ -84,13 +111,38 @@ type BetGame struct {
 	BetsById map[int]int
 }
 
+type SnakeGame struct {
+}
+
 type Game struct {
 	mu         sync.Mutex
 	hostEvents chan *Event
 
-	HostView string    `json:"hostView"`
-	Players  []*Player `json:"players"`
-	BetGame  BetGame   `json:"betGame"`
+	HostView  string    `json:"hostView"`
+	Players   []*Player `json:"players"`
+	BetGame   BetGame   `json:"betGame"`
+	SnakeGame SnakeGame `json:"snakeGame"`
+}
+
+func (g *Game) SendSnakeDirection(playerId int, direction string) {
+	g.hostEvents <- controlSnakeEvent(playerId, direction)
+}
+
+func (g *Game) PlaySnakeGame() {
+	fmt.Println("Waiting for players and host to connect...")
+	ticker := time.NewTicker(1 * time.Second)
+	for range ticker.C {
+		if len(g.Players) >= 1 {
+			ticker.Stop()
+			break
+		}
+	}
+	fmt.Println("Starting game")
+	g.setHostView(HostSnakeGameView)
+
+	for _, player := range g.Players {
+		player.SetView(PlayerSnakeControlView)
+	}
 }
 
 func (g *Game) setHostView(view string) {
@@ -260,16 +312,11 @@ func getGame() *Game {
 		return globalGame
 	}
 	globalGame = &Game{}
-	data, err := ioutil.ReadFile(backupGameFile)
-	if err != nil {
-		fmt.Printf("could not read file at %s\n", backupGameFile)
-		return globalGame
-	}
-	err = json.Unmarshal(data, globalGame)
-	if err != nil {
-		panic(err)
-	}
 	return globalGame
+}
+
+func setGame(game *Game) {
+	globalGame = game
 }
 
 func addPlayerHandler(w http.ResponseWriter, r *http.Request) {
@@ -380,11 +427,6 @@ func connectHostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-type PlayerBetRequest struct {
-	PlayerId int `json:"playerId"`
-	Bet      int `json:"bet"`
-}
-
 func playerBetHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		http.Error(w, "only POST requests allowed", http.StatusBadRequest)
@@ -414,8 +456,57 @@ func playerScoresHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(payload)
 }
 
+func playerSnakeControlHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "only POST requests allowed", http.StatusBadRequest)
+		return
+	}
+	decoder := json.NewDecoder(r.Body)
+	var request PlayerSnakeControlRequest
+	err := decoder.Decode(&request)
+	if err != nil {
+		fmt.Println(err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	fmt.Printf("request: %+v\n", request)
+	getGame().SendSnakeDirection(request.PlayerId, request.Direction)
+}
+
+func logHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "only POST requests allowed", http.StatusBadRequest)
+		return
+	}
+	decoder := json.NewDecoder(r.Body)
+	var request LogRequest
+	err := decoder.Decode(&request)
+	if err != nil {
+		fmt.Println(err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	fmt.Printf("client log: %s\n", request.Data)
+}
+
 func main() {
-	go getGame().Play()
+	restoreFile := flag.String("restore", "", "Restores the game state from a backup file")
+	flag.Parse()
+
+	if len(*restoreFile) > 0 {
+		data, err := ioutil.ReadFile(*restoreFile)
+		if err != nil {
+			panic(fmt.Errorf("read file '%s': %s", *restoreFile, err))
+		}
+		var game Game
+		err = json.Unmarshal(data, &game)
+		if err != nil {
+			panic(fmt.Errorf("read file '%s': %s", *restoreFile, err))
+		}
+		setGame(&game)
+	}
+
+	go getGame().PlaySnakeGame()
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "www/build/index.html")
@@ -429,7 +520,9 @@ func main() {
 	http.HandleFunc("/api/addplayer", addPlayerHandler)
 	http.HandleFunc("/api/player/bet", playerBetHandler)
 	http.HandleFunc("/api/player/scores", playerScoresHandler)
-	
+	http.HandleFunc("/api/player/snake/control", playerSnakeControlHandler)
+	http.HandleFunc("/api/log", logHandler)
+
 	http.HandleFunc("/quiplash/player/episodeCreateAddPrompt", AddEpisodeIdeaToListHandler)
 	http.ListenAndServe(":8080", nil)
 }

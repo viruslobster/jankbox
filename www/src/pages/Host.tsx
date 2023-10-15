@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import HostBetView from './BetGame/HostBetView';
 import HostJoinView from './BetGame//HostJoinView';
 import HostScoresView from './BetGame/HostScoresView';
+import HostSnakeGameView from './SnakeGame/HostSnakeGameView';
 
 interface IState {
   players: Array<string>;
@@ -46,11 +47,13 @@ const Host = () => {
 
   const getViewComponent = (view: string, uniqKey: number) => {
     if (view == "HostBetView") {
-        return <HostBetView key={uniqKey} eventSource={eventSource} />
+      return <HostBetView key={uniqKey} eventSource={eventSource} />
     } else if (view == "HostScoresView") {
-        return <HostScoresView key={uniqKey} eventSource={eventSource} />
+      return <HostScoresView key={uniqKey} eventSource={eventSource} />
     } else if (view == "CreateEpisodeView") {
-        // return <HostCreateEpisodeView key={uniqKey} eventSource={eventSource} />
+      // return <HostCreateEpisodeView key={uniqKey} eventSource={eventSource} />
+    } else if (view == "HostSnakeGameView") {
+      return <HostSnakeGameView key={uniqKey} eventSource={eventSource}/>
     }
     return <HostJoinView key={uniqKey} eventSource={eventSource} />
   };
