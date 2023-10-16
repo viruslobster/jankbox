@@ -18,7 +18,6 @@ const Host = () => {
   });
 
   useEffect(() => {
-    console.log("use effect");
     const es = new EventSource("/api/connect/host");
     es.onerror = (err) => {
       console.log("onerror", err);

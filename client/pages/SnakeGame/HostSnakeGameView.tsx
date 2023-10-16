@@ -46,12 +46,14 @@ class CurveGame {
   ctx: CanvasRenderingContext2D;
   lastUpdate: number;
   player: Player;
+  running: boolean;
 
   constructor(root: HTMLCanvasElement, document: Document) {
     this.root = root;
     this.ctx = this.root.getContext("2d");
     this.lastUpdate = 0;
     this.player = new Player(100, 100, 0);
+    this.running = true;
 
     document.onkeydown = (e) => {
       if (e.code === "ArrowLeft") {
@@ -65,6 +67,14 @@ class CurveGame {
         this.player.straight();
       }
     };
+  }
+
+  stop() {
+    this.running = false;
+  }
+
+  isRunning() {
+    return this.running;
   }
 
   reset() {
@@ -109,7 +119,9 @@ const HostSnakeGameView = ({ eventSource }: HostSnakeGameViewProps) => {
     const loop = (now: number) => {
       game.update(now);
       game.draw(now);
-      window.requestAnimationFrame(loop);
+      if (game.isRunning()) {
+        window.requestAnimationFrame(loop);
+      }
     }
     window.requestAnimationFrame(loop);
 
@@ -128,7 +140,10 @@ const HostSnakeGameView = ({ eventSource }: HostSnakeGameViewProps) => {
     };
     eventSource.addEventListener("ControlSnake", onControlSnake);
 
-    return () => { eventSource.removeEventListener("ControlSnake", onControlSnake) };
+    return () => {
+      game.stop();
+      eventSource.removeEventListener("ControlSnake", onControlSnake);
+    };
   }, [eventSource]);
 
   return (
