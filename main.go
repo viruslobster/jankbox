@@ -508,13 +508,8 @@ func main() {
 
 	go getGame().PlaySnakeGame()
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, "www/build/index.html")
-	})
-
-	fs := http.FileServer(http.Dir("www/build/static/"))
+	fs := http.FileServer(http.Dir("www/build"))
 	http.Handle("/static/", http.StripPrefix("/static", fs))
-
 	http.HandleFunc("/api/connect/player/", connectPlayerHandler)
 	http.HandleFunc("/api/connect/host", connectHostHandler)
 	http.HandleFunc("/api/addplayer", addPlayerHandler)
@@ -522,7 +517,10 @@ func main() {
 	http.HandleFunc("/api/player/scores", playerScoresHandler)
 	http.HandleFunc("/api/player/snake/control", playerSnakeControlHandler)
 	http.HandleFunc("/api/log", logHandler)
-
 	http.HandleFunc("/quiplash/player/episodeCreateAddPrompt", AddEpisodeIdeaToListHandler)
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "www/index.html")
+	})
+
 	http.ListenAndServe(":8080", nil)
 }

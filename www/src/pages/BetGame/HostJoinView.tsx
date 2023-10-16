@@ -26,7 +26,7 @@ const HostJoinView = ({ eventSource }: HostJoinViewProps) => {
   const playerList = players.map((player, i) => <li key={i}>{player}</li>);
   return (
     <div>
-      HostJoinView
+      HostJoinView yo
       {playerList}
     </div>
   );
